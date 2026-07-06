@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-pricing"
+version = "0.1.0"
+description = "Zero-dependency LLM API pricing data and cost estimator for Python"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Duc Nguyen" }]
+requires-python = ">=3.8"
+keywords = ["llm", "pricing", "cost", "openai", "anthropic", "claude", "gpt", "gemini", "tokens", "estimator"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Intended Audience :: Developers",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+llm-pricing = "llm_pricing.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/nguyenminhduc9988/llm-pricing"
+Repository = "https://github.com/nguyenminhduc9988/llm-pricing"
+Issues = "https://github.com/nguyenminhduc9988/llm-pricing/issues"
+
+[tool.setuptools]
+packages = ["llm_pricing"]
