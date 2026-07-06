@@ -43,7 +43,8 @@ PRICING: Dict[str, Dict[str, float]] = {
     "mistral-small":     {"input": 0.20,  "output": 0.60},
 }
 
-_DATE_SUFFIX = re.compile(r"-\d{4}-\d{2}-\d{2}$|-\d{8}$|-latest$|-preview$")
+# One or more trailing date/qualifier suffixes, stripped in a single pass.
+_DATE_SUFFIX = re.compile(r"(?:-\d{4}-\d{2}-\d{2}|-\d{8}|-latest|-preview)+$")
 
 
 class UnknownModelError(KeyError):
@@ -56,31 +57,29 @@ def list_models() -> list:
 
 
 def _normalize(name: str) -> str:
-    """Lowercase and strip common dated/qualifier suffixes."""
-    n = name.strip().lower()
-    # Strip a trailing date / qualifier, repeatedly (e.g. ...-20241022-latest).
-    prev = None
-    while prev != n:
-        prev = n
-        n = _DATE_SUFFIX.sub("", n)
-    return n
+    """Lowercase and strip common dated/qualifier suffixes (one pass)."""
+    return _DATE_SUFFIX.sub("", name.strip().lower())
 
 
 def resolve_model(name: str) -> str:
     """Return the canonical model key for a (possibly suffixed) ``name``.
 
-    Tries exact match first, then a normalized match, then the longest
-    canonical key that is a prefix of the normalized name.
+    Resolution order:
+      1. Exact key match.
+      2. Normalized match (date/qualifier suffixes stripped, lowercased).
+      3. Prefix match — but ONLY when a single canonical key extends the
+         prefix. Ambiguous family prefixes such as ``"claude"`` or
+         ``"deepseek"`` match several keys and deliberately raise rather
+         than silently pick an arbitrary model.
     """
     if name in PRICING:
         return name
     norm = _normalize(name)
     if norm in PRICING:
         return norm
-    # Longest-prefix match against canonical keys.
-    candidates = [k for k in PRICING if norm == k or norm.startswith(k + "-") or k.startswith(norm)]
-    if candidates:
-        return max(candidates, key=len)
+    candidates = [k for k in PRICING if k.startswith(norm + "-")]
+    if len(candidates) == 1:
+        return candidates[0]
     raise UnknownModelError(
         f"Unknown model: {name!r}. Known: {', '.join(list_models()[:6])} ..."
     )
@@ -102,21 +101,27 @@ def estimate_cost(
 
     ``input_tokens`` are charged at the (non-cached) input price;
     ``cache_read_tokens`` and ``cache_write_tokens`` are charged at the
-    provider's cache rates when available, otherwise fall back to input price.
+    provider's cache rates when published. Fallbacks for providers that do
+    not publish a given rate:
+
+      * ``cache_read``  -> input price  (reads are never costlier than input)
+      * ``cache_write`` -> input price * 1.25  (Anthropic-style write premium;
+        conservative over-estimate when a provider charges for writes but
+        omits the rate)
     """
     if min(input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) < 0:
         raise ValueError("token counts must be non-negative")
     p = get_model(model)
     per_m = 1_000_000.0
 
-    def _rate(key: str) -> float:
-        return p.get(key, p["input"])
+    cache_read_rate = p.get("cache_read", p["input"])
+    cache_write_rate = p.get("cache_write", p["input"] * 1.25)
 
     cost = (
         input_tokens * p["input"]
         + output_tokens * p["output"]
-        + cache_read_tokens * _rate("cache_read")
-        + cache_write_tokens * _rate("cache_write")
+        + cache_read_tokens * cache_read_rate
+        + cache_write_tokens * cache_write_rate
     ) / per_m
     return cost
 

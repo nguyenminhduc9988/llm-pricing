@@ -5,7 +5,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .pricing import estimate_cost, format_cost, get_model, list_models
+from .pricing import (
+    UnknownModelError,
+    estimate_cost,
+    format_cost,
+    get_model,
+    list_models,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -31,10 +37,9 @@ def main(argv=None) -> int:
         print("-" * 75)
         for m in list_models():
             p = get_model(m)
-            print(
-                f"{m:<22} {p['input']:>10.4f} {p['output']:>10.4f} "
-                f"{p.get('cache_read', '')!s:>14} {p.get('cache_write', '')!s:>15}"
-            )
+            cr = f"{p['cache_read']:.4f}" if "cache_read" in p else "-"
+            cw = f"{p['cache_write']:.4f}" if "cache_write" in p else "-"
+            print(f"{m:<22} {p['input']:>10.4f} {p['output']:>10.4f} {cr:>14} {cw:>15}")
         return 0
 
     try:
@@ -52,7 +57,7 @@ def main(argv=None) -> int:
         )
         print(resolved)
         return 0
-    except Exception as exc:  # noqa: BLE001 - surface to CLI user
+    except (UnknownModelError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

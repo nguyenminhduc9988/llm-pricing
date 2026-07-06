@@ -1,6 +1,5 @@
 """Tests for llm_pricing — pure stdlib, run with ``python -m pytest`` or unittest."""
 
-import math
 import sys
 import os
 
@@ -34,9 +33,20 @@ class TestPricing(unittest.TestCase):
         self.assertEqual(resolve_model("claude-3-5-sonnet-20241022"), "claude-3-5-sonnet")
         self.assertEqual(resolve_model("GPT-4O-MINI-LATEST"), "gpt-4o-mini")
 
-    def test_resolve_prefix(self):
-        # "deepseek" should resolve to the longest deepseek-* key present.
-        self.assertIn(resolve_model("deepseek"), ("deepseek-chat", "deepseek-reasoner"))
+    def test_ambiguous_family_prefix_raises(self):
+        # Bare family names match several models — must NOT silently pick one.
+        for name in ("claude", "deepseek", "gemini", "gpt", "mistral"):
+            with self.assertRaises(UnknownModelError):
+                resolve_model(name)
+
+    def test_resolve_unambiguous_prefix(self):
+        # A prefix that extends exactly one canonical key still resolves.
+        from llm_pricing import pricing as mod
+        mod.PRICING["zzz-unique-test-model"] = {"input": 1.0, "output": 2.0}
+        try:
+            self.assertEqual(resolve_model("zzz-unique"), "zzz-unique-test-model")
+        finally:
+            del mod.PRICING["zzz-unique-test-model"]
 
     def test_resolve_unknown_raises(self):
         with self.assertRaises(UnknownModelError):
@@ -65,12 +75,19 @@ class TestPricing(unittest.TestCase):
         )
         self.assertAlmostEqual(cost, 6900 / 1_000_000, places=8)
 
-    def test_cache_falls_back_to_input_when_absent(self):
+    def test_cache_read_falls_back_to_input_when_absent(self):
         # gpt-4-turbo has no cache_read -> falls back to input price.
         p = PRICING["gpt-4-turbo"]
         self.assertNotIn("cache_read", p)
         cost = estimate_cost("gpt-4-turbo", input_tokens=0, output_tokens=0, cache_read_tokens=1_000_000)
         self.assertAlmostEqual(cost, p["input"], places=6)
+
+    def test_cache_write_falls_back_to_premium(self):
+        # gpt-4o has cache_read but no cache_write -> write falls back to input*1.25.
+        p = PRICING["gpt-4o"]
+        self.assertNotIn("cache_write", p)
+        cost = estimate_cost("gpt-4o", input_tokens=0, output_tokens=0, cache_write_tokens=1_000_000)
+        self.assertAlmostEqual(cost, p["input"] * 1.25, places=6)
 
     def test_negative_tokens_rejected(self):
         with self.assertRaises(ValueError):
@@ -105,6 +122,12 @@ class TestCLI(unittest.TestCase):
     def test_cli_unknown_model(self):
         from llm_pricing.cli import main
         rc = main(["nope-xyz", "--input", "1"])
+        self.assertEqual(rc, 1)
+
+    def test_cli_negative_tokens(self):
+        # ValueError path must reach the CLI error handler -> rc 1.
+        from llm_pricing.cli import main
+        rc = main(["gpt-4o", "--input", "-1"])
         self.assertEqual(rc, 1)
 
 
